@@ -1,0 +1,78 @@
+/*
+ * Project1_6630406525_Naphat.c
+ *
+ *  Created on: Aug 24, 2025
+ *      Author: Naphat
+ */
+
+#include <stdint.h>
+#define STM32F411xE
+#include "stm32f4xx.h"
+
+int main(void) {
+    // ---------------- Clock Enable ----------------
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN |
+                    RCC_AHB1ENR_GPIOBEN |
+                    RCC_AHB1ENR_GPIOCEN;
+    RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;   // เปิด clock ADC1
+
+    // ---------------- GPIO config ----------------
+    // PA5–PA9 output (7-seg), PB10 output, PC7 output
+    GPIOA->MODER &= ~(GPIO_MODER_MODER5 | GPIO_MODER_MODER6 |
+                      GPIO_MODER_MODER7 | GPIO_MODER_MODER8 |
+                      GPIO_MODER_MODER9);
+    GPIOA->MODER |=  (0b01 << GPIO_MODER_MODER5_Pos) |
+                     (0b01 << GPIO_MODER_MODER6_Pos) |
+                     (0b01 << GPIO_MODER_MODER7_Pos) |
+                     (0b01 << GPIO_MODER_MODER8_Pos) |
+                     (0b01 << GPIO_MODER_MODER9_Pos);
+    GPIOB->MODER &= ~(GPIO_MODER_MODER10);
+    GPIOB->MODER |=  (0b01 << GPIO_MODER_MODER10_Pos);
+    GPIOC->MODER &= ~(GPIO_MODER_MODER7);
+    GPIOC->MODER |=  (0b01 << GPIO_MODER_MODER7_Pos);
+
+    // ---------------- ADC config (PA4 = ADC1_IN4) ----------------
+    GPIOA->MODER |= (0b11 << GPIO_MODER_MODER4_Pos);   // PA4 analog
+    ADC1->CR2 = 0;
+    ADC1->SQR3 = 4;    // channel 4
+    ADC1->CR2 |= ADC_CR2_ADON;
+
+    // ---------------- Variables ----------------
+    uint16_t adc_val = 0;
+    uint8_t number = 0;
+    uint8_t speed = 0;
+
+    // ---------------- Main loop ----------------
+    while (1) {
+        // --- Start ADC Conversion ---
+        ADC1->CR2 |= ADC_CR2_SWSTART;
+        while (!(ADC1->SR & ADC_SR_EOC));
+        adc_val = ADC1->DR;
+
+        // --- Map ADC to speed (0–99) ---
+        speed = (adc_val * 100) / 4096;
+        if (speed > 99) speed = 99;
+
+        // --- Determine number to display (0–9) ---
+        number = speed / 10;
+
+        // --- Clear display ---
+        GPIOA->ODR &= ~((1 << 8) | (1 << 9));
+        GPIOB->ODR &= ~(1 << 10);
+        GPIOC->ODR &= ~(1 << 7);
+
+        // --- Display on 7-seg ---
+        switch (number) {
+            case 1: GPIOC->ODR |= (1 << 7); break;
+            case 2: GPIOA->ODR |= (1 << 8); break;
+            case 3: GPIOA->ODR |= (1 << 8); GPIOC->ODR |= (1 << 7); break;
+            case 4: GPIOB->ODR |= (1 << 10); break;
+            case 5: GPIOB->ODR |= (1 << 10); GPIOC->ODR |= (1 << 7); break;
+            case 6: GPIOA->ODR |= (1 << 8); GPIOB->ODR |= (1 << 10); break;
+            case 7: GPIOA->ODR |= (1 << 8); GPIOB->ODR |= (1 << 10); GPIOC->ODR |= (1 << 7); break;
+            case 8: GPIOA->ODR |= (1 << 9); break;
+            case 9: GPIOA->ODR |= (1 << 9); GPIOC->ODR |= (1 << 7); break;
+            default: break;   // case 0
+        }
+    }
+}
