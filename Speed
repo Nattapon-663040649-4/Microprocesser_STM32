@@ -1,5 +1,5 @@
 /*
- * Project1_6630406525_Naphat.c
+ * Speed.c
  *
  *  Created on: Aug 24, 2025
  *      Author: Naphat
@@ -50,8 +50,9 @@ int main(void) {
         adc_val = ADC1->DR;
 
         // --- Map ADC to speed (0–99) ---
-        speed = (adc_val * 100) / 4096;
+        speed = ( (4095 - adc_val) * 100 ) / 4096;
         if (speed > 99) speed = 99;
+
 
         // --- Determine number to display (0–9) ---
         number = speed / 10;
