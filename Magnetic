@@ -1,0 +1,58 @@
+#include <stdint.h>
+#define STM32F411xE
+#include "stm32f4xx.h"
+
+static void delay(volatile uint32_t t) {
+    while(t--) __NOP();
+}
+
+void UART2_Init(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    GPIOA->MODER &= ~(GPIO_MODER_MODER2 | GPIO_MODER_MODER3);
+    GPIOA->MODER |= (0b10 << GPIO_MODER_MODER2_Pos) | (0b10 << GPIO_MODER_MODER3_Pos);
+    GPIOA->AFR[0] |= (7 << GPIO_AFRL_AFSEL2_Pos) | (7 << GPIO_AFRL_AFSEL3_Pos);
+
+    USART2->BRR = 139; // 115200 @16MHz
+    USART2->CR1 |= USART_CR1_UE | USART_CR1_TE;
+}
+
+void UART2_SendString(char *s) {
+    while (*s) {
+        while (!(USART2->SR & USART_SR_TXE));
+        USART2->DR = *s++;
+    }
+}
+
+int main(void) {
+    // Enable clock for GPIOA
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+
+    // PA0 = Input (Hall OUT)
+    GPIOA->MODER &= ~(3U << (2*0)); // Input mode
+    GPIOA->PUPDR &= ~(3U << (2*0)); // No pull-up/pull-down
+
+    // PA5 = Output (LED)
+    GPIOA->MODER &= ~(3U << (2*5));
+    GPIOA->MODER |= (1U << (2*5));
+
+    // Init UART
+    UART2_Init();
+
+    UART2_SendString("HALL Sensor Test Start\r\n");
+
+    while(1) {
+        uint8_t hall_state = (GPIOA->IDR & (1U << 0)) ? 1 : 0;
+
+        if (hall_state == 0) {
+            GPIOA->BSRR = GPIO_BSRR_BS5; // Turn LED ON
+            UART2_SendString("Magnet DETECTED\r\n");
+        } else {
+            GPIOA->BSRR = GPIO_BSRR_BR5; // Turn LED OFF
+            UART2_SendString("No Magnet\r\n");
+        }
+
+        delay(1000000);
+    }
+}
