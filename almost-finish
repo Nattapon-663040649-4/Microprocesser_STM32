@@ -3,6 +3,7 @@
 #include <math.h>
 #define STM32F411xE
 #include "stm32f4xx.h"
+#include "core_cm4.h"
 
 /* --- ADC Constants --- */
 #define VREF 3.3f
@@ -84,6 +85,10 @@ int main(void) {
     // ADC Pins: PA0 = NTC, PA1 = LDR, PA4 = Potentiometer
     GPIOA->MODER |= (3U << (2*0)) | (3U << (2*1)) | (3U << (2*4));
 
+    // Hall Sensor: PB0 input + pull-up
+    GPIOB->MODER &= ~(3U << (2*0));
+    GPIOB->PUPDR |= (1U << (2*0));
+
     /* --- ADC Config --- */
     ADC1->CR2 = 0;
     ADC1->SMPR2 |= (7 << ADC_SMPR2_SMP0_Pos) | (7 << ADC_SMPR2_SMP1_Pos) | (7 << ADC_SMPR2_SMP4_Pos);
@@ -105,18 +110,35 @@ int main(void) {
     uint16_t adc_val = 0;
     uint8_t pot_number = 0;
 
+    uint8_t system_enabled = 0;
+    uint8_t last_hall = 1;
+
     while(1) {
-        // --- Read Potentiometer PA4 ---
+        /* --- ตรวจจับ Hall Sensor --- */
+        uint8_t hall_now = (GPIOB->IDR & (1U << 0)) ? 1 : 0;
+        if (last_hall == 1 && hall_now == 0) {
+            system_enabled = !system_enabled;
+            if (!system_enabled) {
+                GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6 | GPIO_BSRR_BR7;
+                GPIOB->BSRR = GPIO_BSRR_BR6;
+                Display_7Seg(0);
+            }
+            delay(300000);
+        }
+        last_hall = hall_now;
+
+        if (!system_enabled) continue; // ถ้าระบบปิด → ไม่ทำงาน
+
+        /* --- Read Potentiometer PA4 --- */
         ADC1->SQR3 = 4;
         ADC1->CR2 |= ADC_CR2_SWSTART;
         while (!(ADC1->SR & ADC_SR_EOC));
         adc_val = ADC1->DR;
 
-        // --- Map ADC to number 0–9 แบบหมุนตามเข็มนาฬิกา ---
         pot_number = ((4095 - adc_val) * 10) / 4096; // 0-9
         Display_7Seg(pot_number);
 
-        // --- Read NTC PA0 ---
+        /* --- Read NTC PA0 --- */
         ADC1->SQR3 = 0;
         ADC1->CR2 |= ADC_CR2_SWSTART;
         while (!(ADC1->SR & ADC_SR_EOC));
@@ -126,7 +148,7 @@ int main(void) {
         if (temperature >= 28.0f) GPIOA->BSRR = GPIO_BSRR_BS5;
         else GPIOA->BSRR = GPIO_BSRR_BR5;
 
-        // --- Read LDR PA1 ---
+        /* --- Read LDR PA1 --- */
         ADC1->SQR3 = 1;
         ADC1->CR2 |= ADC_CR2_SWSTART;
         while (!(ADC1->SR & ADC_SR_EOC));
@@ -136,32 +158,27 @@ int main(void) {
         if (lightintensity < 300.0f) GPIOA->BSRR = GPIO_BSRR_BS7;
         else GPIOA->BSRR = GPIO_BSRR_BR7;
 
-        // --- Read Buttons (State) ---
-        uint8_t btn_D2 = (GPIOA->IDR & (1U << 10)) ? 1 : 0; // forward
-        uint8_t btn_D3 = (GPIOB->IDR & (1U << 3)) ? 1 : 0;  // backward
-        uint8_t btn_D4 = (GPIOB->IDR & (1U << 5)) ? 1 : 0;  // left
-        uint8_t btn_D5 = (GPIOB->IDR & (1U << 4)) ? 1 : 0;  // right
+        /* --- Buttons --- */
+        uint8_t btn_D2 = (GPIOA->IDR & (1U << 10)) ? 1 : 0;
+        uint8_t btn_D3 = (GPIOB->IDR & (1U << 3)) ? 1 : 0;
+        uint8_t btn_D4 = (GPIOB->IDR & (1U << 5)) ? 1 : 0;
+        uint8_t btn_D5 = (GPIOB->IDR & (1U << 4)) ? 1 : 0;
         uint8_t state = ((btn_D5==0)<<3)|((btn_D4==0)<<2)|((btn_D3==0)<<1)|(btn_D2==0);
 
-        // --- LED State Machine ---
+        /* --- LED State Machine --- */
         switch(state) {
             case 0x0: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BR6;break;
             case 0x1: GPIOB->BSRR = GPIO_BSRR_BS6; GPIOA->BSRR = GPIO_BSRR_BR6; break;
             case 0x2: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BR6; break;
             case 0x4: GPIOB->BSRR = GPIO_BSRR_BR6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(300000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(300000); break;
             case 0x8: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(300000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(300000); break;
-            case 0x3: case 0xC: case 0x7: case 0xB: case 0xD: case 0xE: case 0xF: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BR6; Display_7Seg(0); break;
-            case 0x5: GPIOB->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(200000); break;
-            case 0x9: GPIOB->BSRR = GPIO_BSRR_BS6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(200000); break;
-            case 0x6: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(200000); break;
-            case 0xA: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(200000); break;
             default:
-            	GPIOA->BSRR = GPIO_BSRR_BR6; // ดับแดง
-            	GPIOB->BSRR = GPIO_BSRR_BR6;
-            	Display_7Seg(0); break;
+                GPIOA->BSRR = GPIO_BSRR_BR6;
+                GPIOB->BSRR = GPIO_BSRR_BR6;
+                Display_7Seg(0);
+                break;
         }
 
-        delay(50000); // small delay
+        delay(50000);
     }
 }
-
