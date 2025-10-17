@@ -1,7 +1,7 @@
-/* main.c - เวอร์ชันรวม Hall switch (PB0) กับโค้ดเดิม
+/* main.c - เวอร์ชันรวม Hall switch (PB0) กับโหมดพิเศษ
    Target: STM32F411xE
    พฤติกรรม: เริ่มต้นระบบ "ปิด" -> แม่เหล็ก HALL(PB0) ครั้งแรก -> เปิดระบบ
-               -> ครั้งถัดไป -> ปิดระบบ
+             กดปุ่ม 4 ปุ่มพร้อมกัน -> เข้าโหมดพิเศษ
 */
 
 #include <stdint.h>
@@ -56,7 +56,7 @@ void Display_7Seg(uint8_t number) {
 }
 
 int main(void) {
-    char stringOut[50];
+    char stringOut[100];
 
     /* --- Enable Clocks --- */
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
@@ -83,9 +83,9 @@ int main(void) {
 
     // Buttons: PA10, PB3, PB5, PB4 (input, pull-up)
     GPIOA->MODER &= ~(3U << (2*10));
-    GPIOB->MODER &= ~(3U << (2*3 | 2*5 | 2*4));
+    GPIOB->MODER &= ~((3U << (2*3)) | (3U << (2*5)) | (3U << (2*4)));
     GPIOA->PUPDR |= (1U << (2*10));
-    GPIOB->PUPDR |= (1U << (2*3 | 2*5 | 2*4));
+    GPIOB->PUPDR |= (1U << (2*3)) | (1U << (2*5)) | (1U << (2*4));
 
     // ADC Pins
     GPIOA->MODER |= (3U << (2*0)) | (3U << (2*1)) | (3U << (2*4));
@@ -117,8 +117,18 @@ int main(void) {
     uint8_t pot_number = 0;
 
     /* --- Hall control variables --- */
-    uint8_t system_enabled = 0;           // 0 = system off (เริ่มต้นปิด)
-    uint8_t last_hall = (GPIOB->IDR & (1U << 0)) ? 1 : 0; // อ่านค่าเริ่มต้น PB0
+    uint8_t system_enabled = 0;
+    uint8_t last_hall = (GPIOB->IDR & (1U << 0)) ? 1 : 0;
+
+    /* --- Special Mode Variables --- */
+    uint8_t special_mode = 0;        // 0=normal, 1=mode1, 2=mode2
+    uint8_t mode1_state = 0;         // 0=unactive, 1=active
+    uint8_t mode2_state = 0;         // 0=unactive, 1=active
+    uint8_t mode1_confirmed = 0;
+    uint8_t mode2_confirmed = 0;
+
+    uint8_t last_btn_D2 = 1, last_btn_D3 = 1, last_btn_D4 = 1, last_btn_D5 = 1;
+    uint8_t last_all_pressed = 0;
 
     /* --- Main loop --- */
     while(1) {
@@ -127,31 +137,132 @@ int main(void) {
         if (last_hall == 1 && hall_now == 0) {
             system_enabled = !system_enabled;
             if (!system_enabled) {
-                // ปิดไฟ LED ทั้งหมด
                 GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6 | GPIO_BSRR_BR7;
                 GPIOB->BSRR = GPIO_BSRR_BR6;
-                // แสดง 7-seg = 0
                 Display_7Seg(0);
+                special_mode = 0;
             }
-            delay(300000); // debounce
+            delay(300000);
         }
         last_hall = hall_now;
 
-        /* --- ถ้าระบบปิด ให้ข้ามการทำงานทั้งหมด --- */
         if (!system_enabled) continue;
 
+        /* --- Read Buttons --- */
+        uint8_t btn_D2 = (GPIOA->IDR & (1U << 10)) ? 1 : 0; // PA10 - forward
+        uint8_t btn_D3 = (GPIOB->IDR & (1U << 3)) ? 1 : 0;  // PB3 - backward
+        uint8_t btn_D4 = (GPIOB->IDR & (1U << 5)) ? 1 : 0;  // PB5 - left
+        uint8_t btn_D5 = (GPIOB->IDR & (1U << 4)) ? 1 : 0;  // PB4 - right
+
+        /* --- ตรวจจับการกดปุ่ม 4 ปุ่มพร้อมกัน --- */
+        uint8_t all_pressed = (!btn_D2 && !btn_D3 && !btn_D4 && !btn_D5);
+        if (all_pressed && !last_all_pressed && special_mode == 0) {
+            // เข้าโหมดพิเศษ Mode 1
+            special_mode = 1;
+            mode1_confirmed = 0;
+            mode2_confirmed = 0;
+            mode1_state = 0;
+            mode2_state = 0;
+
+            // ติดไฟ PB6 และ PA7
+            GPIOB->BSRR = GPIO_BSRR_BS6;
+            GPIOA->BSRR = GPIO_BSRR_BS7;
+            GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6;
+
+            vdg_UART_TxString("mode1 unactive\n");
+            delay(300000);
+        }
+        last_all_pressed = all_pressed;
+
+        /* --- Special Mode Logic --- */
+        if (special_mode == 1) {
+            // Mode 1: รอการกดปุ่ม PA10 หรือ PB3 เพื่อเปลี่ยนสถานะ
+            if (!btn_D2 && last_btn_D2) { // กด PA10
+                mode1_state = !mode1_state;
+                if (mode1_state) {
+                    vdg_UART_TxString("mode1 active\n");
+                } else {
+                    vdg_UART_TxString("mode1 unactive\n");
+                }
+                delay(300000);
+            }
+
+            if (!btn_D3 && last_btn_D3) { // กด PB3
+                mode1_state = !mode1_state;
+                if (mode1_state) {
+                    vdg_UART_TxString("mode1 active\n");
+                } else {
+                    vdg_UART_TxString("mode1 unactive\n");
+                }
+                delay(300000);
+            }
+
+            // กด PB4 เพื่อยืนยัน
+            if (!btn_D5 && last_btn_D5) {
+                mode1_confirmed = 1;
+
+                // แสดงข้อความยืนยัน Mode 1
+                vdg_UART_TxString("Mode 1 has been successfully selected.\n");
+
+                special_mode = 2;
+
+                // เปลี่ยนไฟเป็น PA5 และ PA6
+                GPIOB->BSRR = GPIO_BSRR_BR6;
+                GPIOA->BSRR = GPIO_BSRR_BR7;
+                GPIOA->BSRR = GPIO_BSRR_BS5 | GPIO_BSRR_BS6;
+
+                vdg_UART_TxString("mode2 unactive\n");
+                delay(300000);
+            }
+        } else if (special_mode == 2) {
+            // Mode 2: รอการกดปุ่ม PB3 เพื่อเปลี่ยนสถานะ
+            if (!btn_D3 && last_btn_D3) { // กด PB3
+                mode2_state = !mode2_state;
+                if (mode2_state) {
+                    vdg_UART_TxString("mode2 active\n");
+                } else {
+                    vdg_UART_TxString("mode2 unactive\n");
+                }
+                delay(300000);
+            }
+
+            // กด PB4 เพื่อยืนยัน
+            if (!btn_D5 && last_btn_D5) {
+                mode2_confirmed = 1;
+
+                // แสดงข้อความยืนยัน Mode 2
+                vdg_UART_TxString("Mode 2 has been successfully selected.\n");
+
+                // แสดงผลสรุป
+                sprintf(stringOut, "mode1 %s, mode2 %s\n",
+                        mode1_state ? "active" : "unactive",
+                        mode2_state ? "active" : "unactive");
+                vdg_UART_TxString(stringOut);
+
+                // กลับสู่โหมดปกติ
+                special_mode = 0;
+                GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6 | GPIO_BSRR_BR7;
+                GPIOB->BSRR = GPIO_BSRR_BR6;
+                delay(300000);
+            }
+        }
+
+        // เก็บค่าปุ่มเดิม
+        last_btn_D2 = btn_D2;
+        last_btn_D3 = btn_D3;
+        last_btn_D4 = btn_D4;
+        last_btn_D5 = btn_D5;
+
+        /* --- ถ้าอยู่ในโหมดพิเศษให้ข้ามการทำงานปกติ --- */
+        if (special_mode > 0) continue;
+
+        /* --- โหมดปกติ --- */
         /* --- Read Potentiometer PA4 --- */
         ADC1->SQR3 = 4;
         ADC1->CR2 |= ADC_CR2_SWSTART;
         while (!(ADC1->SR & ADC_SR_EOC));
         adc_val = ADC1->DR;
         pot_number = ((4095 - adc_val) * 10) / 4096;
-
-        /* --- Read Buttons --- */
-        uint8_t btn_D2 = (GPIOA->IDR & (1U << 10)) ? 1 : 0; // forward
-        uint8_t btn_D3 = (GPIOB->IDR & (1U << 3)) ? 1 : 0;  // backward
-        uint8_t btn_D4 = (GPIOB->IDR & (1U << 5)) ? 1 : 0;  // left
-        uint8_t btn_D5 = (GPIOB->IDR & (1U << 4)) ? 1 : 0;  // right
 
         // ถ้าไม่มีปุ่มกดใดเลย ให้ 7-segment = 0
         if (btn_D2 && btn_D3 && btn_D4 && btn_D5) {
@@ -168,11 +279,11 @@ int main(void) {
             case 0x2: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BR6; break;
             case 0x4: GPIOB->BSRR = GPIO_BSRR_BR6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(300000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(300000); break;
             case 0x8: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(300000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(300000); break;
-            case 0x3: case 0xC: case 0x7: case 0xB: case 0xD: case 0xE: case 0xF: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BR6; Display_7Seg(0); break;
-            case 0x5: GPIOB->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(200000); break;
+            case 0x3: case 0xC: case 0x7: case 0xB: case 0xD: case 0xE: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BR6; Display_7Seg(0); break;
+            case 0x5: GPIOB->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(200000); break;
             case 0x9: GPIOB->BSRR = GPIO_BSRR_BS6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(200000); break;
             case 0x6: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOB->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOB->BSRR = GPIO_BSRR_BR6; delay(200000); break;
-            case 0xA: GPIOA->BSRR = GPIO_BSRR_BS6; GPIOA->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(200000); break;
+            case 0xA: GPIOA->BSRR = GPIO_BSRR_BS6; delay(200000); GPIOA->BSRR = GPIO_BSRR_BR6; delay(200000); break;
             default: GPIOA->BSRR = GPIO_BSRR_BR6; GPIOB->BSRR = GPIO_BSRR_BR6; Display_7Seg(0); break;
         }
 
