@@ -181,7 +181,7 @@ int main(void) {
             GPIOA->BSRR = GPIO_BSRR_BS7;
             GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6;
 
-            vdg_UART_TxString("Mode_1 turbo mode inactive\n");
+            vdg_UART_TxString("Press button 1 to select turbo mode\n");
             delay(300000);
         }
         last_all_pressed = all_pressed;
@@ -189,7 +189,8 @@ int main(void) {
         /* --- Special Mode Logic --- */
         if (special_mode == 1) {
             // Mode 1: Turbo Mode - กดปุ่ม PA10 หรือ PB3 เพื่อเปลี่ยนสถานะ
-            if (!btn_D2 && last_btn_D2) { // press PA10
+            // ต้องกดปุ่มเดี่ยว ไม่ใช่กดหลายปุ่มพร้อมกัน
+            if (!btn_D2 && last_btn_D2 && btn_D3 && btn_D4 && btn_D5) { // press PA10 เท่านั้น
                 turbo_mode = !turbo_mode;
                 if (turbo_mode) {
                     vdg_UART_TxString("Mode_1 turbo mode active\n");
@@ -199,7 +200,7 @@ int main(void) {
                 delay(300000);
             }
 
-            if (!btn_D3 && last_btn_D3) { // press PB3
+            if (!btn_D3 && last_btn_D3 && btn_D2 && btn_D4 && btn_D5) { // press PB3 เท่านั้น
                 turbo_mode = !turbo_mode;
                 if (turbo_mode) {
                     vdg_UART_TxString("Mode_1 turbo mode active\n");
@@ -209,8 +210,8 @@ int main(void) {
                 delay(300000);
             }
 
-            // กด PB4 เพื่อยืนยัน
-            if (!btn_D5 && last_btn_D5) {
+            // กด PB4 เพื่อยืนยัน (กดเฉพาะ PB4 เท่านั้น)
+            if (!btn_D5 && last_btn_D5 && btn_D2 && btn_D3 && btn_D4) {
                 mode1_confirmed = 1;
 
                 // แสดงข้อความยืนยัน Mode 1
@@ -223,12 +224,13 @@ int main(void) {
                 GPIOA->BSRR = GPIO_BSRR_BR7;
                 GPIOA->BSRR = GPIO_BSRR_BS5 | GPIO_BSRR_BS6;
 
-                vdg_UART_TxString("\nMode_2 closed window\n");
+                vdg_UART_TxString("\nPress button 1 to select window mode\n");
                 delay(300000);
             }
         } else if (special_mode == 2) {
             // Mode 2: Window Mode - รอการกดปุ่ม PB3 เพื่อเปลี่ยนสถานะ
-            if (!btn_D3 && last_btn_D3) { // กด PB3
+            // ต้องกดปุ่มเดี่ยว ไม่ใช่กดหลายปุ่มพร้อมกัน
+            if (!btn_D3 && last_btn_D3 && btn_D2 && btn_D4 && btn_D5) { // กด PB3 เท่านั้น
                 window_mode = !window_mode;
                 if (window_mode) {
                     vdg_UART_TxString("Mode_2 opened window\n");
@@ -238,8 +240,8 @@ int main(void) {
                 delay(300000);
             }
 
-            // กด PB4 เพื่อยืนยัน
-            if (!btn_D5 && last_btn_D5) {
+            // กด PB4 เพื่อยืนยัน (กดเฉพาะ PB4 เท่านั้น)
+            if (!btn_D5 && last_btn_D5 && btn_D2 && btn_D3 && btn_D4) {
                 mode2_confirmed = 1;
 
                 // แสดงข้อความยืนยัน Mode 2
