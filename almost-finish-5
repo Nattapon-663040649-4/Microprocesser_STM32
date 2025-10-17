@@ -124,6 +124,9 @@ int main(void) {
     uint8_t system_enabled = 0;
     uint8_t last_hall = (GPIOB->IDR & (1U << 0)) ? 1 : 0;
 
+    /* --- แสดงข้อความเริ่มต้น --- */
+    vdg_UART_TxString("The car hasn't started yet\n");
+
     /* --- Special Mode Variables --- */
     uint8_t special_mode = 0;        // 0=normal, 1=mode1, 2=mode2
     uint8_t mode1_state = 0;         // 0=unactive, 1=active
@@ -143,8 +146,12 @@ int main(void) {
             if (!system_enabled) {
                 GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6 | GPIO_BSRR_BR7;
                 GPIOB->BSRR = GPIO_BSRR_BR6;
+                GPIOC->ODR &= ~(1 << 6); // Buzzer OFF
                 Display_7Seg(0);
                 special_mode = 0;
+                vdg_UART_TxString("The car hasn't started yet\n");
+            } else {
+                vdg_UART_TxString("The car has been started and is now in normal operating mode.\n");
             }
             delay(300000);
         }
@@ -162,6 +169,8 @@ int main(void) {
         uint8_t all_pressed = (!btn_D2 && !btn_D3 && !btn_D4 && !btn_D5);
         if (all_pressed && !last_all_pressed && special_mode == 0) {
             // เข้าโหมดพิเศษ Mode 1
+            vdg_UART_TxString("The car has entered special mode.\n");
+
             special_mode = 1;
             mode1_confirmed = 0;
             mode2_confirmed = 0;
@@ -238,7 +247,8 @@ int main(void) {
                 vdg_UART_TxString("Mode 2 has been successfully selected.\n");
 
                 // แสดงผลสรุป
-                sprintf(stringOut, "mode1 %s, mode2 %s\n",
+                sprintf(stringOut, "mode1 %s, mode2 %s\n"
+                		"Returned to normal driving mode with the selected special mode.",
                         mode1_state ? "active" : "unactive",
                         mode2_state ? "active" : "unactive");
                 vdg_UART_TxString(stringOut);
@@ -298,7 +308,7 @@ int main(void) {
         float adc_voltage_ntc = (ADC1->DR * VREF) / ADC_MAXRES;
         float r_ntc = RX * adc_voltage_ntc / (VREF - adc_voltage_ntc);
         float temperature = (BETA*T0)/(T0*logf(r_ntc/R0)+BETA) - 273.15f;
-        if (temperature >= 31.0f) GPIOA->BSRR = GPIO_BSRR_BS5; else GPIOA->BSRR = GPIO_BSRR_BR5;
+        if (temperature >= 28.0f) GPIOA->BSRR = GPIO_BSRR_BS5; else GPIOA->BSRR = GPIO_BSRR_BR5;
 
         /* --- Read LDR PA1 --- */
         ADC1->SQR3 = 1;
