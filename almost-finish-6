@@ -1,8 +1,8 @@
-/* main.c - เวอร์ชันรวม Hall switch (PB0) กับโหมดพิเศษ
-   Target: STM32F411xE
-   พฤติกรรม: เริ่มต้นระบบ "ปิด" -> แม่เหล็ก HALL(PB0) ครั้งแรก -> เปิดระบบ
-             กดปุ่ม 4 ปุ่มพร้อมกัน -> เข้าโหมดพิเศษ
-*/
+/*
+ * STM32F411 Car Control System with Special Modes
+ * Mode 1: Turbo Mode Control
+ * Mode 2: Window Control
+ */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -63,7 +63,8 @@ int main(void) {
     RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
     RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
-    /* --- GPIO Config (ตามโค้ดเดิม) --- */
+    /* --- GPIO Config --- */
+    // 7-Segment pins: PA8, PA9, PB10, PC7
     GPIOA->MODER &= ~(GPIO_MODER_MODER8 | GPIO_MODER_MODER9);
     GPIOA->MODER |= (1 << GPIO_MODER_MODER8_Pos) | (1 << GPIO_MODER_MODER9_Pos);
     GPIOB->MODER &= ~(GPIO_MODER_MODER10);
@@ -91,7 +92,7 @@ int main(void) {
     GPIOA->PUPDR |= (1U << (2*10));
     GPIOB->PUPDR |= (1U << (2*3)) | (1U << (2*5)) | (1U << (2*4));
 
-    // ADC Pins
+    // ADC Pins: PA0, PA1, PA4
     GPIOA->MODER |= (3U << (2*0)) | (3U << (2*1)) | (3U << (2*4));
 
     // Hall Sensor: PB0 input + pull-up
@@ -124,13 +125,13 @@ int main(void) {
     uint8_t system_enabled = 0;
     uint8_t last_hall = (GPIOB->IDR & (1U << 0)) ? 1 : 0;
 
-    /* --- แสดงข้อความเริ่มต้น --- */
-    vdg_UART_TxString("The car hasn't started yet\n");
+    /* --- Show begin text --- */
+    vdg_UART_TxString("Car is OFF. Press remote to start the engine.\n");
 
     /* --- Special Mode Variables --- */
     uint8_t special_mode = 0;        // 0=normal, 1=mode1, 2=mode2
-    uint8_t mode1_state = 0;         // 0=unactive, 1=active
-    uint8_t mode2_state = 0;         // 0=unactive, 1=active
+    uint8_t turbo_mode = 0;          // 0=inactive, 1=active
+    uint8_t window_mode = 0;         // 0=closed, 1=opened
     uint8_t mode1_confirmed = 0;
     uint8_t mode2_confirmed = 0;
 
@@ -139,7 +140,7 @@ int main(void) {
 
     /* --- Main loop --- */
     while(1) {
-        /* --- ตรวจจับ Hall Sensor (edge: HIGH -> LOW) --- */
+        /* --- Detect Hall Sensor (edge: HIGH -> LOW) --- */
         uint8_t hall_now = (GPIOB->IDR & (1U << 0)) ? 1 : 0;
         if (last_hall == 1 && hall_now == 0) {
             system_enabled = !system_enabled;
@@ -149,9 +150,9 @@ int main(void) {
                 GPIOC->ODR &= ~(1 << 6); // Buzzer OFF
                 Display_7Seg(0);
                 special_mode = 0;
-                vdg_UART_TxString("The car hasn't started yet\n");
+                vdg_UART_TxString("Engine OFF. Car stopped.\n");
             } else {
-                vdg_UART_TxString("The car has been started and is now in normal operating mode.\n");
+                vdg_UART_TxString("Engine started. Ready to drive. Normal mode activated.\n");
             }
             delay(300000);
         }
@@ -165,47 +166,45 @@ int main(void) {
         uint8_t btn_D4 = (GPIOB->IDR & (1U << 5)) ? 1 : 0;  // PB5 - left
         uint8_t btn_D5 = (GPIOB->IDR & (1U << 4)) ? 1 : 0;  // PB4 - right
 
-        /* --- ตรวจจับการกดปุ่ม 4 ปุ่มพร้อมกัน --- */
+        /* --- Detect if press 4 buttons together --- */
         uint8_t all_pressed = (!btn_D2 && !btn_D3 && !btn_D4 && !btn_D5);
         if (all_pressed && !last_all_pressed && special_mode == 0) {
-            // เข้าโหมดพิเศษ Mode 1
-            vdg_UART_TxString("The car has entered special mode.\n");
+            // Enter Special Vehicle Mode Mode 1
+            vdg_UART_TxString("\nEntering Special Vehicle Mode...\n");
 
             special_mode = 1;
             mode1_confirmed = 0;
             mode2_confirmed = 0;
-            mode1_state = 0;
-            mode2_state = 0;
 
-            // ติดไฟ PB6 และ PA7
+            // LEDs PB6 and PA7
             GPIOB->BSRR = GPIO_BSRR_BS6;
             GPIOA->BSRR = GPIO_BSRR_BS7;
             GPIOA->BSRR = GPIO_BSRR_BR5 | GPIO_BSRR_BR6;
 
-            vdg_UART_TxString("mode1 unactive\n");
+            vdg_UART_TxString("Mode_1 turbo mode inactive\n");
             delay(300000);
         }
         last_all_pressed = all_pressed;
 
         /* --- Special Mode Logic --- */
         if (special_mode == 1) {
-            // Mode 1: รอการกดปุ่ม PA10 หรือ PB3 เพื่อเปลี่ยนสถานะ
-            if (!btn_D2 && last_btn_D2) { // กด PA10
-                mode1_state = !mode1_state;
-                if (mode1_state) {
-                    vdg_UART_TxString("mode1 active\n");
+            // Mode 1: Turbo Mode - กดปุ่ม PA10 หรือ PB3 เพื่อเปลี่ยนสถานะ
+            if (!btn_D2 && last_btn_D2) { // press PA10
+                turbo_mode = !turbo_mode;
+                if (turbo_mode) {
+                    vdg_UART_TxString("Mode_1 turbo mode active\n");
                 } else {
-                    vdg_UART_TxString("mode1 unactive\n");
+                    vdg_UART_TxString("Mode_1 turbo mode inactive\n");
                 }
                 delay(300000);
             }
 
-            if (!btn_D3 && last_btn_D3) { // กด PB3
-                mode1_state = !mode1_state;
-                if (mode1_state) {
-                    vdg_UART_TxString("mode1 active\n");
+            if (!btn_D3 && last_btn_D3) { // press PB3
+                turbo_mode = !turbo_mode;
+                if (turbo_mode) {
+                    vdg_UART_TxString("Mode_1 turbo mode active\n");
                 } else {
-                    vdg_UART_TxString("mode1 unactive\n");
+                    vdg_UART_TxString("Mode_1 turbo mode inactive\n");
                 }
                 delay(300000);
             }
@@ -224,17 +223,17 @@ int main(void) {
                 GPIOA->BSRR = GPIO_BSRR_BR7;
                 GPIOA->BSRR = GPIO_BSRR_BS5 | GPIO_BSRR_BS6;
 
-                vdg_UART_TxString("mode2 unactive\n");
+                vdg_UART_TxString("\nMode_2 closed window\n");
                 delay(300000);
             }
         } else if (special_mode == 2) {
-            // Mode 2: รอการกดปุ่ม PB3 เพื่อเปลี่ยนสถานะ
+            // Mode 2: Window Mode - รอการกดปุ่ม PB3 เพื่อเปลี่ยนสถานะ
             if (!btn_D3 && last_btn_D3) { // กด PB3
-                mode2_state = !mode2_state;
-                if (mode2_state) {
-                    vdg_UART_TxString("mode2 active\n");
+                window_mode = !window_mode;
+                if (window_mode) {
+                    vdg_UART_TxString("Mode_2 opened window\n");
                 } else {
-                    vdg_UART_TxString("mode2 unactive\n");
+                    vdg_UART_TxString("Mode_2 closed window\n");
                 }
                 delay(300000);
             }
@@ -247,10 +246,10 @@ int main(void) {
                 vdg_UART_TxString("Mode 2 has been successfully selected.\n");
 
                 // แสดงผลสรุป
-                sprintf(stringOut, "mode1 %s, mode2 %s\n"
-                		"Returned to normal driving mode with the selected special mode.",
-                        mode1_state ? "active" : "unactive",
-                        mode2_state ? "active" : "unactive");
+                sprintf(stringOut, "\nmode1 turbo mode %s, mode2 %s window\n"
+                		"Returned to normal driving mode with the selected special mode.\n",
+                        turbo_mode ? "active" : "inactive",
+                        window_mode ? "opened" : "closed");
                 vdg_UART_TxString(stringOut);
 
                 // กลับสู่โหมดปกติ
@@ -279,10 +278,17 @@ int main(void) {
         pot_number = ((4095 - adc_val) * 10) / 4096;
 
         // ถ้าไม่มีปุ่มกดใดเลย ให้ 7-segment = 0
+        // ถ้า turbo_mode active และมีการกดปุ่ม ให้แสดง 9
         if (btn_D2 && btn_D3 && btn_D4 && btn_D5) {
+            // ไม่กดปุ่มใดเลย
             Display_7Seg(0);
         } else {
-            Display_7Seg(pot_number);
+            // มีการกดปุ่ม
+            if (turbo_mode) {
+                Display_7Seg(9);
+            } else {
+                Display_7Seg(pot_number);
+            }
         }
 
         /* --- LED State Machine (โค้ดเดิม) --- */
@@ -308,7 +314,15 @@ int main(void) {
         float adc_voltage_ntc = (ADC1->DR * VREF) / ADC_MAXRES;
         float r_ntc = RX * adc_voltage_ntc / (VREF - adc_voltage_ntc);
         float temperature = (BETA*T0)/(T0*logf(r_ntc/R0)+BETA) - 273.15f;
-        if (temperature >= 28.0f) GPIOA->BSRR = GPIO_BSRR_BS5; else GPIOA->BSRR = GPIO_BSRR_BR5;
+
+        // ถ้า window_mode เป็น opened (1) ให้ PA5 ดับตลอด
+        // ถ้าเป็น closed (0) ให้ทำงานตามอุณหภูมิปกติ
+        if (window_mode) {
+            GPIOA->BSRR = GPIO_BSRR_BR5; // ดับตลอด
+        } else {
+            if (temperature >= 28.0f) GPIOA->BSRR = GPIO_BSRR_BS5;
+            else GPIOA->BSRR = GPIO_BSRR_BR5;
+        }
 
         /* --- Read LDR PA1 --- */
         ADC1->SQR3 = 1;
@@ -323,7 +337,7 @@ int main(void) {
         if (lightintensity > 500.0f) {
             GPIOC->ODR |= (1 << 6);  // PC6 = High → Buzzer ON
         } else {
-            GPIOC->ODR &= ~(1 << 6); // PC6 = Low  → Buzzer OFF
+            GPIOC->ODR &= ~(1 << 6); // PC6 = Low  → Buzzer OF
         }
 
         delay(50000);
