@@ -71,6 +71,10 @@ int main(void) {
     GPIOC->MODER &= ~(GPIO_MODER_MODER7);
     GPIOC->MODER |= (1 << GPIO_MODER_MODER7_Pos);
 
+    // Buzzer: PC6 output
+    GPIOC->MODER &= ~(GPIO_MODER_MODER6);
+    GPIOC->MODER |= (1 << GPIO_MODER_MODER6_Pos);
+
     // LED Pins
     GPIOA->MODER &= ~(3U << (2*6));
     GPIOA->MODER |= (1U << (2*6)); // PA6 = Red LED
@@ -294,7 +298,7 @@ int main(void) {
         float adc_voltage_ntc = (ADC1->DR * VREF) / ADC_MAXRES;
         float r_ntc = RX * adc_voltage_ntc / (VREF - adc_voltage_ntc);
         float temperature = (BETA*T0)/(T0*logf(r_ntc/R0)+BETA) - 273.15f;
-        if (temperature >= 28.0f) GPIOA->BSRR = GPIO_BSRR_BS5; else GPIOA->BSRR = GPIO_BSRR_BR5;
+        if (temperature >= 31.0f) GPIOA->BSRR = GPIO_BSRR_BS5; else GPIOA->BSRR = GPIO_BSRR_BR5;
 
         /* --- Read LDR PA1 --- */
         ADC1->SQR3 = 1;
@@ -304,6 +308,13 @@ int main(void) {
         float r_ldr = RX * adc_voltage_ldr / (VREF - adc_voltage_ldr);
         float lightintensity = powf(10, SLOPE * log10f(r_ldr) + OFFSET);
         if (lightintensity < 300.0f) GPIOA->BSRR = GPIO_BSRR_BS7; else GPIOA->BSRR = GPIO_BSRR_BR7;
+
+        /* --- Buzzer Control based on Light Intensity --- */
+        if (lightintensity > 500.0f) {
+            GPIOC->ODR |= (1 << 6);  // PC6 = High → Buzzer ON
+        } else {
+            GPIOC->ODR &= ~(1 << 6); // PC6 = Low  → Buzzer OFF
+        }
 
         delay(50000);
     }
